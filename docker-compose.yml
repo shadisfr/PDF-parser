@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  tika:
+    image: apache/tika:1.28.4
+    ports:
+      - "9998:9998"
+    networks:
+      - docnet
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.11-management
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+    networks:
+      - docnet
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.0
+    ports:
+      - "6379:6379"
+    networks:
+      - docnet
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      TIKA_SERVER_URL: http://tika:9998
+      CELERY_BROKER_URL: amqp://admin:admin@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - shared_data:/data            # shared uploads
+      # - ./api/app:/code/app          # dev convenience (hot reload if you add --reload)
+    depends_on:
+      - tika
+      - rabbitmq
+      - redis
+    networks:
+      - docnet
+    restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: celery_worker/Dockerfile
+    environment:
+      TIKA_SERVER_URL: http://tika:9998
+      CELERY_BROKER_URL: amqp://admin:admin@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - shared_data:/data
+      # - ./api/app:/code/app
+    depends_on:
+      - tika
+      - rabbitmq
+      - redis
+    networks:
+      - docnet
+    restart: unless-stopped
+
+networks:
+  docnet:
+    driver: bridge
+
+volumes:
+  shared_data:
